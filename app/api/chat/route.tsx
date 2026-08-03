@@ -18,40 +18,45 @@ COMMUNICATION RULES:
 
     const client = new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
-      baseURL: "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)",
+      baseURL: "https://api.groq.com/openai/v1",
     });
-
-    const tools = [
-      {
-        type: "function",
-        function: {
-          name: "update_ui_filters",
-          description: "Update filters for finding programs. ONLY call this if the user explicitly mentions filtering by country, scholarship, budget, etc.",
-          parameters: {
-            type: "object",
-            properties: {
-              country: { type: "string" },
-              scholarship: { type: "string" },
-              budget: { type: "string" },
-              gpa: { type: "string" },
-              field: { type: "string" },
-              language: { type: "string" },
-              format: { type: "string" },
-              duration: { type: "string" },
-              certificate: { type: "string" }
-            }
-          }
-        }
-      }
-    ];
 
     const completion = await client.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: apiMessages,
       temperature: 0.3,
-      tools: tools,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "update_ui_filters",
+            description: "Update filters for finding programs. ONLY call this if the user explicitly mentions filtering by country, scholarship, budget, etc.",
+            parameters: {
+              type: "object",
+              properties: {
+                country: { type: "string" },
+                scholarship: { type: "string" },
+                budget: { type: "string" },
+                gpa: { type: "string" },
+                field: { type: "string" },
+                language: { type: "string" },
+                format: { type: "string" },
+                duration: { type: "string" },
+                certificate: { type: "string" }
+              }
+            }
+          }
+        }
+      ],
       tool_choice: "auto",
     });
+
+    if (!completion.choices || completion.choices.length === 0) {
+      return NextResponse.json({ 
+        isToolCall: false, 
+        result: { content: "Произошла ошибка при генерации ответа." } 
+      });
+    }
 
     const responseMessage = completion.choices[0].message;
     let finalContent = responseMessage.content || "";
@@ -71,30 +76,57 @@ COMMUNICATION RULES:
     }
 
     const cutOffKeywords = ["update_ui_filters", "function=", "function =", "<function", "tool_call", "```json", "```"];
+    let earliestIndex = finalContent.length;
+    
     for (const kw of cutOffKeywords) {
-      const idx = finalContent.toLowerCase().indexOf(kw);
-      if (idx !== -1) {
-        finalContent = finalContent.substring(0, idx);
+      const idx = finalContent.toLowerCase().indexOf(kw.toLowerCase());
+      if (idx !== -1 && idx < earliestIndex) {
+        earliestIndex = idx;
       }
+    }
+
+    if (earliestIndex < finalContent.length) {
+      finalContent = finalContent.substring(0, earliestIndex);
     }
     
     finalContent = finalContent.replace(/[<>]/g, '').trim();
 
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
       const toolCall = responseMessage.tool_calls[0];
+      let safeArgs = "{}";
+      
+      try {
+        JSON.parse(toolCall.function.arguments);
+        safeArgs = toolCall.function.arguments;
+      } catch (e) {
+        safeArgs = "{}";
+      }
+
       return NextResponse.json({ 
         isToolCall: true,
-        toolData: toolCall.function,
+        toolData: {
+          name: toolCall.function.name,
+          arguments: safeArgs
+        },
         aiText: finalContent !== "" ? finalContent : "✨ Я обновила фильтры!" 
       });
     }
 
     if (fallbackArgs) {
+      let safeArgs = "{}";
+      
+      try {
+        JSON.parse(fallbackArgs);
+        safeArgs = fallbackArgs;
+      } catch (e) {
+        safeArgs = "{}";
+      }
+
       return NextResponse.json({
         isToolCall: true,
         toolData: {
           name: "update_ui_filters",
-          arguments: fallbackArgs
+          arguments: safeArgs
         },
         aiText: finalContent !== "" ? finalContent : "✨ Я обновила фильтры!"
       });
