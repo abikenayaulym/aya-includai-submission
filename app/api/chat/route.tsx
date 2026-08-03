@@ -18,7 +18,7 @@ COMMUNICATION RULES:
 
     const client = new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
-      baseURL: "https://api.groq.com/openai/v1",
+      baseURL: "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)",
     });
 
     const tools = [
@@ -61,19 +61,23 @@ COMMUNICATION RULES:
     const keywordIndex = finalContent.indexOf(toolKeyword);
 
     if (keywordIndex !== -1) {
-      const textPart = finalContent.substring(0, keywordIndex).trim();
       const remainder = finalContent.substring(keywordIndex + toolKeyword.length);
-
       const jsonStart = remainder.indexOf('{');
       const jsonEnd = remainder.lastIndexOf('}');
 
       if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
         fallbackArgs = remainder.substring(jsonStart, jsonEnd + 1);
       }
-
-      finalContent = textPart;
     }
 
+    const cutOffKeywords = ["update_ui_filters", "function=", "function =", "<function", "tool_call", "```json", "```"];
+    for (const kw of cutOffKeywords) {
+      const idx = finalContent.toLowerCase().indexOf(kw);
+      if (idx !== -1) {
+        finalContent = finalContent.substring(0, idx);
+      }
+    }
+    
     finalContent = finalContent.replace(/[<>]/g, '').trim();
 
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
