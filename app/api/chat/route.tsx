@@ -5,8 +5,6 @@ export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
 
-    // 1. ИЗМЕНЕННЫЙ ПРОМПТ: Убрали правило "никогда не возвращай пустую строку" 
-    // и жестко запретили писать теги в тексте.
     let systemPrompt = `You are Aya AI, a highly empathetic and helpful academic advisor.
 COMMUNICATION RULES:
 1. ALWAYS respond in the language the user is speaking.
@@ -56,20 +54,39 @@ COMMUNICATION RULES:
     });
 
     const responseMessage = completion.choices[0].message;
-
-    // 2. БРОНЕЖИЛЕТ НА БЭКЕНДЕ: Жестко вырезаем мусор, если Llama всё равно его выдала
     let cleanContent = responseMessage.content || "";
-    cleanContent = cleanContent.replace(/<function[^>]*>[\s\S]*?<\/function>/gi, '').trim();
-    cleanContent = cleanContent.replace(/```json[\s\S]*?```/gi, '').trim();
+
 
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
       const toolCall = responseMessage.tool_calls[0];
       return NextResponse.json({ 
         isToolCall: true,
         toolData: toolCall.function,
-        aiText: cleanContent !== "" ? cleanContent : "✨ Я обновила фильтры по твоему запросу!" 
+        aiText: cleanContent.replace(/<[^>]*>/g, '').trim() || "✨ Я обновила фильтры по твоему запросу!" 
       });
     }
+
+
+    const toolMatch = cleanContent.match(/([a-zA-Z0-9_]+)>(\{[\s\S]*?\})<\/function>/);
+    if (toolMatch) {
+      const toolName = toolMatch[1];
+      const toolArgsString = toolMatch[2];
+      
+      const textOnly = cleanContent.replace(toolMatch[0], '').trim();
+
+      return NextResponse.json({
+        isToolCall: true,
+        toolData: {
+          name: toolName,
+          arguments: toolArgsString
+        },
+        aiText: textOnly !== "" ? textOnly : "✨ Я обновила фильтры по твоему запросу!"
+      });
+    }
+
+    
+    cleanContent = cleanContent.replace(/<[^>]*>[\s\S]*?<\/[^>]*>/gi, '').trim();
+    cleanContent = cleanContent.replace(/```json[\s\S]*?```/gi, '').trim();
 
     const finalContent = cleanContent !== "" 
       ? cleanContent 
